@@ -8,26 +8,23 @@ from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
-# ==============================
-#        CONFIG & SETUP
-# ==============================
+# =========================
+#   CONFIGURATION
+# =========================
 
 load_dotenv()
-BOT_TOKEN = os.getenv("MTQzMzkwNzI5NjQ4ODAwMTU1Ng.G3v3G0.h0zqZSSqXV8soJltKDw_Fy_emPSY3tFGG0u5nw")  # Stored securely in .env
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Set this in Replit Secrets or .env
 ALLOWED_CHANNEL_NAME = "scriptos"
-COOLDOWN_SECONDS = 60  # 1 minute
+COOLDOWN_SECONDS = 60  # 1 minute cooldown
 
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-
 cooldowns = {}  # {user_id: timestamp}
 
-
-# ==============================
-#       KEEP-ALIVE SERVER
-# ==============================
-
+# =========================
+#   KEEP-ALIVE WEB SERVER
+# =========================
 app = Flask('')
 
 @app.route('/')
@@ -40,11 +37,9 @@ def run_web():
 def keep_alive():
     Thread(target=run_web).start()
 
-
-# ==============================
-#          BOT EVENTS
-# ==============================
-
+# =========================
+#   BOT EVENTS
+# =========================
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
@@ -54,13 +49,11 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Failed to sync commands: {e}")
 
-
-# ==============================
-#      HASTEBIN UPLOAD
-# ==============================
-
+# =========================
+#   HASTEBIN UPLOAD
+# =========================
 async def upload_to_hastebin(name: str, script_text: str, key: str) -> str:
-    """Upload script to Hastebin and return the URL."""
+    """Uploads script to Hastebin and returns a shareable link."""
     content = f"Name: {name}\n\nScript:\n{script_text}\n\nKey:\n{key}"
     async with aiohttp.ClientSession() as session:
         async with session.post("https://hastebin.com/documents", data=content.encode("utf-8")) as resp:
@@ -70,11 +63,9 @@ async def upload_to_hastebin(name: str, script_text: str, key: str) -> str:
             key_id = data.get("key")
             return f"https://hastebin.com/{key_id}" if key_id else None
 
-
-# ==============================
-#        /script COMMAND
-# ==============================
-
+# =========================
+#   SLASH COMMAND: /script
+# =========================
 @bot.tree.command(name="script", description="Upload a script with name and key.")
 @app_commands.describe(
     name="Name or title of the script.",
@@ -82,10 +73,10 @@ async def upload_to_hastebin(name: str, script_text: str, key: str) -> str:
     key="The key associated with the script."
 )
 async def script(interaction: discord.Interaction, name: str, script: str, key: str):
-    # Only allowed channel
+    # Check allowed channel
     if interaction.channel.name != ALLOWED_CHANNEL_NAME:
         await interaction.response.send_message(
-            "⚠️ You can only use this command in **#scriptos**.",
+            f"⚠️ Use this command only in **#{ALLOWED_CHANNEL_NAME}**.",
             ephemeral=True
         )
         return
@@ -104,36 +95,39 @@ async def script(interaction: discord.Interaction, name: str, script: str, key: 
             return
     cooldowns[user_id] = now
 
-    # Defer response
     await interaction.response.defer(thinking=True)
 
-    # Upload
+    # Upload script
     paste_url = await upload_to_hastebin(name, script, key)
     if not paste_url:
         await interaction.followup.send("❌ Failed to upload script. Try again later.")
         cooldowns.pop(user_id, None)
         return
 
-    # Embed
+    # Embed message
     embed = discord.Embed(
         title=f"📜 {name}",
-        description="Your script has been uploaded!",
+        description="Your script has been uploaded successfully!",
         color=discord.Color.blurple()
     )
     embed.add_field(name="Script Preview", value=f"```{script[:100]}...```", inline=False)
     embed.add_field(name="Key", value=f"```{key}```", inline=False)
-    embed.set_footer(text="Click the button below to view or copy the full script.")
+    embed.set_footer(text="Click below to view or copy the full script.")
 
     view = discord.ui.View()
-    view.add_item(discord.ui.Button(label="🔗 View / Copy Script", style=discord.ButtonStyle.link, url=paste_url))
+    view.add_item(
+        discord.ui.Button(
+            label="🔗 View / Copy Script",
+            style=discord.ButtonStyle.link,
+            url=paste_url
+        )
+    )
 
     await interaction.followup.send(embed=embed, view=view)
 
-
-# ==============================
-#   DELETE NON-COMMAND MESSAGES
-# ==============================
-
+# =========================
+#   MESSAGE FILTER
+# =========================
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
@@ -152,10 +146,8 @@ async def on_message(message: discord.Message):
                 print(f"Error deleting message: {e}")
     await bot.process_commands(message)
 
-
-# ==============================
-#         RUN BOT
-# ==============================
-
-keep_alive()  # Keeps the bot alive on Replit
+# =========================
+#   RUN BOT
+# =========================
+keep_alive()
 bot.run(BOT_TOKEN)
