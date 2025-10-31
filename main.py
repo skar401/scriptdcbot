@@ -13,7 +13,9 @@ from threading import Thread
 # =========================
 
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Set this in Replit Secrets or .env
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+PASTEBIN_API_KEY = os.getenv("PASTEBIN_API_KEY")
+
 ALLOWED_CHANNEL_NAME = "scriptos"
 COOLDOWN_SECONDS = 60  # 1 minute cooldown
 
@@ -50,18 +52,37 @@ async def on_ready():
         print(f"❌ Failed to sync commands: {e}")
 
 # =========================
-#   HASTEBIN UPLOAD
+#   PASTEBIN UPLOAD
 # =========================
-async def upload_to_hastebin(name: str, script_text: str, key: str) -> str:
-    """Uploads script to Hastebin and returns a shareable link."""
-    content = f"Name: {name}\n\nScript:\n{script_text}\n\nKey:\n{key}"
+async def upload_to_pastebin(name: str, script_text: str, key: str) -> str:
+    """Uploads the script to Pastebin and returns the paste URL."""
+    if not PASTEBIN_API_KEY:
+        print("❌ Missing Pastebin API key.")
+        return None
+
+    paste_content = f"Name: {name}\n\nScript:\n{script_text}\n\nKey:\n{key}"
+
+    data = {
+        "api_dev_key": PASTEBIN_API_KEY,
+        "api_option": "paste",
+        "api_paste_code": paste_content,
+        "api_paste_name": name,
+        "api_paste_private": "1",  # 0 = public, 1 = unlisted, 2 = private
+        "api_paste_expire_date": "N",  # Never expires
+        "api_paste_format": "text"
+    }
+
     async with aiohttp.ClientSession() as session:
-        async with session.post("https://hastebin.com/documents", data=content.encode("utf-8")) as resp:
+        async with session.post("https://pastebin.com/api/api_post.php", data=data) as resp:
             if resp.status != 200:
+                print(f"❌ Pastebin upload failed with status {resp.status}")
                 return None
-            data = await resp.json()
-            key_id = data.get("key")
-            return f"https://hastebin.com/{key_id}" if key_id else None
+            paste_url = await resp.text()
+            if paste_url.startswith("http"):
+                return paste_url
+            else:
+                print(f"❌ Pastebin error: {paste_url}")
+                return None
 
 # =========================
 #   SLASH COMMAND: /script
@@ -73,7 +94,6 @@ async def upload_to_hastebin(name: str, script_text: str, key: str) -> str:
     key="The key associated with the script."
 )
 async def script(interaction: discord.Interaction, name: str, script: str, key: str):
-    # Check allowed channel
     if interaction.channel.name != ALLOWED_CHANNEL_NAME:
         await interaction.response.send_message(
             f"⚠️ Use this command only in **#{ALLOWED_CHANNEL_NAME}**.",
@@ -81,7 +101,6 @@ async def script(interaction: discord.Interaction, name: str, script: str, key: 
         )
         return
 
-    # Cooldown check
     user_id = interaction.user.id
     now = time.time()
     if user_id in cooldowns:
@@ -97,8 +116,8 @@ async def script(interaction: discord.Interaction, name: str, script: str, key: 
 
     await interaction.response.defer(thinking=True)
 
-    # Upload script
-    paste_url = await upload_to_hastebin(name, script, key)
+    # Upload to Pastebin
+    paste_url = await upload_to_pastebin(name, script, key)
     if not paste_url:
         await interaction.followup.send("❌ Failed to upload script. Try again later.")
         cooldowns.pop(user_id, None)
@@ -107,7 +126,7 @@ async def script(interaction: discord.Interaction, name: str, script: str, key: 
     # Embed message
     embed = discord.Embed(
         title=f"📜 {name}",
-        description="Your script has been uploaded successfully!",
+        description="Your script has been uploaded to Pastebin!",
         color=discord.Color.blurple()
     )
     embed.add_field(name="Script Preview", value=f"```{script[:100]}...```", inline=False)
@@ -117,7 +136,7 @@ async def script(interaction: discord.Interaction, name: str, script: str, key: 
     view = discord.ui.View()
     view.add_item(
         discord.ui.Button(
-            label="🔗 View / Copy Script",
+            label="🔗 View on Pastebin",
             style=discord.ButtonStyle.link,
             url=paste_url
         )
